@@ -1,13 +1,19 @@
 /* global L, io */
 
 (() => {
-  // ---- State ----
   const els = {
     connBadge: document.getElementById("connBadge"),
-    loginPanel: document.getElementById("loginPanel"),
+
+    lobbyView: document.getElementById("lobbyView"),
+    gameView: document.getElementById("gameView"),
+    endView: document.getElementById("endView"),
+
     nameInput: document.getElementById("nameInput"),
     joinBtn: document.getElementById("joinBtn"),
     playerName: document.getElementById("playerName"),
+
+    playersList: document.getElementById("playersList"),
+    playersEmpty: document.getElementById("playersEmpty"),
 
     phaseBanner: document.getElementById("phaseBanner"),
     imageWrap: document.getElementById("imageWrap"),
@@ -20,52 +26,49 @@
     clearBtn: document.getElementById("clearBtn"),
     statusText: document.getElementById("statusText"),
 
-    playersList: document.getElementById("playersList"),
-    playersEmpty: document.getElementById("playersEmpty"),
-
     scoresEmpty: document.getElementById("scoresEmpty"),
     scoresList: document.getElementById("scoresList"),
+
+    endScoresEmpty: document.getElementById("endScoresEmpty"),
+    endScoresList: document.getElementById("endScoresList"),
   };
 
   const storageKey = "geoquiz.name";
   let myName = localStorage.getItem(storageKey) || "";
-
   let socket = null;
-
-  // Current “server state” snapshot
   let serverState = null;
 
-  // My local guess (not necessarily submitted yet)
-  let myGuess = null; // {lat, lon}
+  let myGuess = null;
   let myGuessMarker = null;
 
-  // Markers for all guesses + the answer
-  let othersLayer = null;
-  let answerMarker = null;
-  let answerLineLayer = null;
+  let guessesLayer = null;
+  let answerLayer = null;
 
   // ---- Map ----
-  const map = L.map("map", {
-    worldCopyJump: true,
-    zoomControl: true,
-  }).setView([20, 0], 2);
-
+  const map = L.map("map", { worldCopyJump: true }).setView([20, 0], 2);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: "&copy; OpenStreetMap contributors",
   }).addTo(map);
 
-  othersLayer = L.layerGroup().addTo(map);
-  answerLineLayer = L.layerGroup().addTo(map);
+  guessesLayer = L.layerGroup().addTo(map);
+  answerLayer = L.layerGroup().addTo(map);
 
   function setConnBadge(text, ok) {
     els.connBadge.textContent = text;
     els.connBadge.className =
       "text-xs px-3 py-1 rounded-full " +
-      (ok ? "bg-emerald-900/40 border border-emerald-700 text-emerald-200" : "bg-slate-800 text-slate-200");
+      (ok
+        ? "bg-emerald-900/40 border border-emerald-700 text-emerald-200"
+        : "bg-slate-800 text-slate-200");
+  }
+
+  function setStatus(text) {
+    if (els.statusText) els.statusText.textContent = text;
   }
 
   function banner(text, kind) {
+    if (!els.phaseBanner) return;
     els.phaseBanner.classList.remove("hidden");
     let cls = "rounded-xl border px-3 py-2 text-sm ";
     if (kind === "warn") cls += "border-amber-700 bg-amber-900/30 text-amber-100";
@@ -76,45 +79,67 @@
   }
 
   function clearBanner() {
+    if (!els.phaseBanner) return;
     els.phaseBanner.classList.add("hidden");
   }
 
-  function setStatus(text) {
-    els.statusText.textContent = text;
+  function showView(which) {
+    els.lobbyView.classList.add("hidden");
+    els.gameView.classList.add("hidden");
+    els.endView.classList.add("hidden");
+
+    if (which === "lobby") els.lobbyView.classList.remove("hidden");
+    if (which === "game") els.gameView.classList.remove("hidden");
+    if (which === "end") els.endView.classList.remove("hidden");
+
+    // Leaflet needs invalidateSize when container visibility changes
+    setTimeout(() => map.invalidateSize(), 0);
   }
 
-  function ensureNameUI() {
-    els.nameInput.value = myName;
-    els.playerName.textContent = myName || "—";
-    els.joinBtn.disabled = !els.nameInput.value.trim();
+    function ensureNameUI() {
+    if (els.nameInput) els.nameInput.value = myName;
+    if (els.playerName) els.playerName.textContent = myName || "—";
+
+    if (myName) {
+        lockNameUI();
+    } else if (els.joinBtn) {
+        els.joinBtn.disabled = !(els.nameInput && els.nameInput.value.trim());
+    }
+    }
+
+
+  function lockNameUI() {
+    if (!els.nameInput || !els.joinBtn) return;
+    els.nameInput.disabled = true;
+    els.nameInput.classList.add("opacity-70", "cursor-not-allowed");
+    els.joinBtn.disabled = true;
+    els.joinBtn.classList.add("opacity-70", "cursor-not-allowed");
   }
 
-  // ---- Joining ----
   function join(name) {
     myName = name.trim();
     if (!myName) return;
 
     localStorage.setItem(storageKey, myName);
-    els.playerName.textContent = myName;
+    if (els.playerName) els.playerName.textContent = myName;
 
     socket.emit("join", { name: myName });
-    els.loginPanel.classList.add("hidden");
-    setStatus("Joined. Waiting for the game…");
+
+    lockNameUI();
+    setStatus("Joined.");
   }
 
+
+  // Lobby join UI events
   els.nameInput.addEventListener("input", () => {
     els.joinBtn.disabled = !els.nameInput.value.trim();
   });
-
-  els.joinBtn.addEventListener("click", () => {
-    join(els.nameInput.value);
-  });
-
+  els.joinBtn.addEventListener("click", () => join(els.nameInput.value));
   els.nameInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") join(els.nameInput.value);
   });
 
-  // ---- Guessing ----
+  // ---- Guessing interaction ----
   map.on("click", (e) => {
     if (!serverState) return;
     const phase = serverState.phase?.type;
@@ -126,7 +151,9 @@
 
     if (myGuessMarker) myGuessMarker.remove();
     myGuessMarker = L.marker([myGuess.lat, myGuess.lon]).addTo(map);
-    myGuessMarker.bindPopup(`<b>Your guess</b><br/>${myGuess.lat.toFixed(4)}, ${myGuess.lon.toFixed(4)}`);
+    myGuessMarker.bindPopup(
+      `<b>Your guess</b><br/>${myGuess.lat.toFixed(4)}, ${myGuess.lon.toFixed(4)}`
+    );
 
     els.submitBtn.disabled = false;
     els.clearBtn.disabled = false;
@@ -152,10 +179,10 @@
       longitude: myGuess.lon,
     });
     els.submitBtn.disabled = true;
-    setStatus("Guess submitted.");
+    setStatus("Guess submitted. Waiting for others…");
   });
 
-  // ---- Rendering helpers ----
+  // ---- Rendering ----
   function renderPlayers(joined) {
     els.playersList.innerHTML = "";
     if (!joined || joined.length === 0) {
@@ -176,211 +203,172 @@
     }
   }
 
-  function renderScores(scores) {
-    els.scoresList.innerHTML = "";
-    if (!scores || Object.keys(scores).length === 0) {
-      els.scoresEmpty.textContent = "—";
+  function renderScoresInto(listEl, emptyEl, scores) {
+    listEl.innerHTML = "";
+    const keys = scores ? Object.keys(scores) : [];
+    if (!scores || keys.length === 0) {
+      emptyEl.textContent = "—";
       return;
     }
+    emptyEl.textContent = "";
 
-    els.scoresEmpty.textContent = "";
-    const rows = Object.entries(scores)
-      .sort((a, b) => b[1] - a[1])
-      .map(([name, score]) => ({ name, score }));
-
-    for (const r of rows) {
+    const rows = Object.entries(scores).sort((a, b) => a[1] - b[1]);
+    for (const [name, score] of rows) {
       const li = document.createElement("li");
-      const isMe = myName && r.name === myName;
+      const isMe = myName && name === myName;
       li.className =
         "flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2";
       li.innerHTML = `
-        <span class="${isMe ? "font-semibold text-slate-100" : "text-slate-200"}">${escapeHtml(r.name)}</span>
-        <span class="tabular-nums text-slate-100">${r.score.toFixed(1)}</span>
+        <span class="${isMe ? "font-semibold text-slate-100" : "text-slate-200"}">${escapeHtml(name)}</span>
+        <span class="tabular-nums text-slate-100">${Number(score).toFixed(1)} km</span>
       `;
-      els.scoresList.appendChild(li);
+      listEl.appendChild(li);
     }
   }
 
-  function resetPerRoundUI() {
-    // Clear local guess
+  function resetRoundUI() {
     myGuess = null;
     if (myGuessMarker) {
       myGuessMarker.remove();
       myGuessMarker = null;
     }
-    els.submitBtn.disabled = true;
-    els.clearBtn.disabled = true;
+    guessesLayer.clearLayers();
+    answerLayer.clearLayers();
 
-    // Clear map layers
-    othersLayer.clearLayers();
-    answerLineLayer.clearLayers();
-    if (answerMarker) {
-      answerMarker.remove();
-      answerMarker = null;
+    if (els.submitBtn) els.submitBtn.disabled = true;
+    if (els.clearBtn) els.clearBtn.disabled = true;
+  }
+
+  function renderLobby(phase, upcomingCount) {
+    showView("lobby");
+    clearBanner();
+    setStatus("In lobby.");
+
+    renderPlayers(phase.joined || []);
+    ensureNameUI();
+
+    if (myName && (phase.joined || []).includes(myName)) {
+      lockNameUI();
     }
   }
 
-  function renderQuestionPhase(phase, upcomingQuestionsCount) {
+
+  function renderQuestion(phase, upcomingCount) {
+    showView("game");
+
+    els.remainingLabel.textContent = String(upcomingCount ?? "—");
+    els.roundLabel.textContent = "Question";
+
+    // Image
     els.imageWrap.classList.remove("hidden");
     els.questionImage.src = phase.question.image_path;
 
-    els.remainingLabel.textContent = String(upcomingQuestionsCount ?? "—");
+    // Leaderboard (always visible in game)
+    renderScoresInto(els.scoresList, els.scoresEmpty, phase.scores);
 
-    // “Round label” is not provided by server; we can infer by remaining.
-    // This is optional — you can remove it if you dislike the inference.
-    els.roundLabel.textContent = "Question";
+    // If question changed, clear markers
+    const img = phase.question?.image_path || "";
+    if (renderQuestion._lastImg && renderQuestion._lastImg !== img) resetRoundUI();
+    renderQuestion._lastImg = img;
 
-    renderScores(phase.scores);
-
-    // Show everyone who has joined (lobby list is only in lobby; we can show guessers here)
-    // If you want, you can keep joined list server-side for question rounds too.
-    // For now, show guessers as "players" + anyone in scores.
-    const players = new Set(Object.keys(phase.scores || {}));
-    renderPlayers([...players].sort());
-
-    // Render guesses markers
-    othersLayer.clearLayers();
-    for (const [name, g] of Object.entries(phase.guesses || {})) {
-      const m = L.circleMarker([g.lat, g.lon], { radius: 7 });
-      m.bindPopup(`<b>${escapeHtml(name)}</b><br/>${g.lat.toFixed(4)}, ${g.lon.toFixed(4)}`);
-      m.addTo(othersLayer);
-    }
+    // Before reveal: DO NOT show other guesses
+    guessesLayer.clearLayers();
+    answerLayer.clearLayers();
 
     if (!phase.revealed) {
       clearBanner();
       setStatus("Click the map to place a pin.");
-      // If I already submitted a guess earlier, disable submit
+      // If I already guessed, lock submit
       if (myName && phase.guesses && phase.guesses[myName]) {
         els.submitBtn.disabled = true;
         els.clearBtn.disabled = true;
-        setStatus("Guess submitted. Waiting for reveal…");
+        setStatus("Guess submitted. Waiting for others…");
       }
       return;
     }
 
-    // Revealed: show answer marker and lines to guesses
-    banner("Revealed! Actual location is shown on the map.", "ok");
-    setStatus("Round revealed.");
+    // Revealed
+    banner("Revealed! Pins and answer are shown.", "ok");
+    setStatus("Revealed.");
 
     const qLat = phase.question.latitude;
     const qLon = phase.question.longitude;
 
-    // Safety: longitude is only sent when revealed per your backend (it becomes null otherwise)
-    if (qLat != null && qLon != null) {
-      if (answerMarker) answerMarker.remove();
-      answerMarker = L.marker([qLat, qLon]).addTo(map);
-      answerMarker.bindPopup(`<b>Actual location</b><br/>${qLat.toFixed(4)}, ${qLon.toFixed(4)}`);
+    // Draw answer pin
+    const answer = L.marker([qLat, qLon]).addTo(answerLayer);
+    answer.bindTooltip("Actual location", { permanent: true, direction: "top", offset: [0, -10] });
+    answer.bindPopup(`<b>Actual location</b><br/>${qLat.toFixed(4)}, ${qLon.toFixed(4)}`);
 
-      answerLineLayer.clearLayers();
-      for (const [name, g] of Object.entries(phase.guesses || {})) {
-        const line = L.polyline(
-          [
-            [g.lat, g.lon],
-            [qLat, qLon],
-          ],
-          { weight: 2, opacity: 0.7 }
-        );
-        line.bindPopup(`<b>${escapeHtml(name)}</b> → actual`);
-        line.addTo(answerLineLayer);
-      }
+    // Draw all guesses + name labels
+    const boundsPoints = [[qLat, qLon]];
+    for (const [name, g] of Object.entries(phase.guesses || {})) {
+      const marker = L.marker([g.lat, g.lon]).addTo(guessesLayer);
 
-      // Fit view roughly around all markers
-      const pts = [];
-      pts.push([qLat, qLon]);
-      for (const g of Object.values(phase.guesses || {})) pts.push([g.lat, g.lon]);
-      if (pts.length > 1) map.fitBounds(pts, { padding: [30, 30] });
-      else map.setView([qLat, qLon], 6);
+      // Permanent label with name next to marker
+      marker.bindTooltip(escapeHtml(name), {
+        permanent: true,
+        direction: "right",
+        offset: [10, 0],
+        className: "leaflet-tooltip-name",
+      });
+
+      marker.bindPopup(`<b>${escapeHtml(name)}</b><br/>${g.lat.toFixed(4)}, ${g.lon.toFixed(4)}`);
+      boundsPoints.push([g.lat, g.lon]);
+    }
+
+    // Fit to all markers (answer + guesses)
+    if (boundsPoints.length >= 2) {
+      map.fitBounds(boundsPoints, { padding: [40, 40] });
+    } else {
+      map.setView([qLat, qLon], 6);
     }
   }
+  renderQuestion._lastImg = "";
 
-  function renderLobbyPhase(phase, upcomingQuestionsCount) {
-    els.imageWrap.classList.add("hidden");
-    els.questionImage.src = "";
-
-    els.roundLabel.textContent = "Lobby";
-    els.remainingLabel.textContent = String(upcomingQuestionsCount ?? "—");
-
-    renderPlayers(phase.joined || []);
-    els.scoresList.innerHTML = "";
-    els.scoresEmpty.textContent = "No scores yet.";
-
-    resetPerRoundUI();
-
-    banner("Waiting for host to start the first question (type 'n' / 'next' in the server console).", "warn");
-    setStatus("In lobby.");
-  }
-
-  function renderEndPhase(phase) {
-    els.imageWrap.classList.add("hidden");
-    resetPerRoundUI();
-    renderScores(phase.scores || {});
-    banner("Game over. Final scores shown on the right.", "ok");
+  function renderEnd(phase) {
+    showView("end");
+    resetRoundUI();
+    clearBanner();
     setStatus("Finished.");
+
+    // End page: leaderboard only
+    renderScoresInto(els.endScoresList, els.endScoresEmpty, phase.scores);
   }
 
   function renderFromState(s) {
     serverState = s;
 
-    // If user already has a saved name, hide login once connected.
-    if (myName) {
-      els.loginPanel.classList.add("hidden");
-      els.playerName.textContent = myName;
-    } else {
-      els.loginPanel.classList.remove("hidden");
-    }
-
-    // Always show “remaining”
-    const remaining = s.upcoming_questions;
+    // Keep name displayed
+    if (els.playerName) els.playerName.textContent = myName || "—";
 
     const phase = s.phase;
     if (!phase) return;
 
-    // If we transitioned into a new question, clear per-round UI.
-    // Heuristic: when image_path changes or type changes.
-    const phaseType = phase.type;
-    if (phaseType !== "question") {
-      // If leaving question round, clear local markers
-      resetPerRoundUI();
-    } else {
-      // If this is a *new* question, reset
-      const img = phase.question?.image_path || "";
-      if (renderFromState._lastImg && renderFromState._lastImg !== img) resetPerRoundUI();
-      renderFromState._lastImg = img;
-    }
-
-    if (phaseType === "lobby") return renderLobbyPhase(phase, remaining);
-    if (phaseType === "question") return renderQuestionPhase(phase, remaining);
-    if (phaseType === "end") return renderEndPhase(phase);
+    if (phase.type === "lobby") return renderLobby(phase, s.upcoming_questions);
+    if (phase.type === "question") return renderQuestion(phase, s.upcoming_questions);
+    if (phase.type === "end") return renderEnd(phase);
 
     console.warn("Unknown phase", phase);
   }
-  renderFromState._lastImg = "";
 
   // ---- Connect socket ----
   function connect() {
-    socket = io({
-      transports: ["websocket", "polling"],
-    });
+    socket = io({ transports: ["websocket", "polling"] });
 
     socket.on("connect", () => {
       setConnBadge("Connected", true);
       setStatus("Connected.");
-
-      // Auto-join if we have a stored name
       if (myName) socket.emit("join", { name: myName });
     });
 
     socket.on("disconnect", () => {
       setConnBadge("Disconnected", false);
-      setStatus("Disconnected. Trying to reconnect…");
+      setStatus("Disconnected. Reconnecting…");
     });
 
-    socket.on("state", (payload) => {
-      renderFromState(payload);
-    });
+    socket.on("state", (payload) => renderFromState(payload));
   }
 
-  // ---- Small util ----
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => {
       switch (c) {

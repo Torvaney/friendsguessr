@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
-  <head>
+
+<head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>FriendssGouessr</title>
@@ -9,18 +10,10 @@
     <script src="https://cdn.tailwindcss.com"></script>
 
     <!-- Leaflet -->
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-      crossorigin=""
-    />
-    <script
-      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-      crossorigin=""
-      defer
-    ></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
 
     <!-- Socket.IO client (must match server major version; v4 works with modern Flask-SocketIO) -->
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" defer></script>
@@ -29,151 +22,174 @@
     <script src="/static/app.js" defer></script>
 
     <style>
-      /* Leaflet container needs explicit height */
-      #map {
-        height: 420px;
-      }
+        /* Leaflet container needs explicit height */
+        #map {
+            height: 420px;
+        }
+
+        #map {
+            height: 420px;
+        }
+
+        @keyframes pop {
+            0% {
+                transform: scale(0.98);
+                opacity: 0;
+            }
+
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        .pop-in {
+            animation: pop 220ms ease-out;
+        }
+
+        @keyframes glow {
+
+            0%,
+            100% {
+                filter: drop-shadow(0 0 0 rgba(16, 185, 129, 0));
+            }
+
+            50% {
+                filter: drop-shadow(0 0 10px rgba(16, 185, 129, 0.55));
+            }
+        }
+
+        .winner-glow {
+            animation: glow 1.2s ease-in-out infinite;
+        }
     </style>
-  </head>
+</head>
 
-  <body class="bg-slate-950 text-slate-100 min-h-screen">
+<body class="bg-slate-950 text-slate-100 min-h-screen">
     <div class="max-w-6xl mx-auto p-4 md:p-8 space-y-6">
-      <!-- Header -->
-      <header class="flex items-center justify-between gap-4">
-        <div>
-          <h1 class="text-2xl md:text-3xl font-semibold tracking-tight">FriendssGouessr</h1>
-          <p class="text-slate-300 text-sm md:text-base">
-            Drop a pin where you think the photo was taken.
-          </p>
-        </div>
+        <!-- Header -->
+        <header class="flex items-center justify-between gap-4">
+            <div>
+                <h1 class="text-2xl md:text-3xl font-semibold tracking-tight">FriendssGouessr</h1>
+                <p class="text-slate-300 text-sm md:text-base">
+                    Drop a pin where you think the photo was taken.
+                </p>
+            </div>
 
-        <div id="connBadge" class="text-xs px-3 py-1 rounded-full bg-slate-800 text-slate-200">
-          Connecting…
-        </div>
-      </header>
+            <div id="connBadge" class="text-xs px-3 py-1 rounded-full bg-slate-800 text-slate-200">
+                Connecting…
+            </div>
+        </header>
 
-      <!-- Login -->
-      <section id="loginPanel" class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 md:p-6">
-        <div class="flex flex-col md:flex-row gap-3 md:items-end">
-          <div class="flex-1">
-            <label class="block text-sm text-slate-300 mb-1" for="nameInput">Your name</label>
-            <input
-              id="nameInput"
-              class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-slate-400"
-              placeholder="e.g. Ben"
-              autocomplete="nickname"
-            />
-          </div>
-          <button
-            id="joinBtn"
-            class="px-4 py-2 rounded-xl bg-slate-100 text-slate-950 font-medium hover:bg-white disabled:opacity-50"
-          >
-            Join
-          </button>
-        </div>
-        <p id="loginHint" class="text-xs text-slate-400 mt-3">
-          Everyone on the Wi-Fi can join via this URL.
-        </p>
-      </section>
+        <!-- Lobby -->
+        <section id="lobbyView" class="space-y-6">
+            <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 md:p-6">
+                <img id="lobbyImage" src="/static/lobby.png" alt="Lobby"
+                    class="w-full max-h-[60vh] object-contain rounded-2xl border border-slate-800 bg-slate-950" />
+            </div>
 
-      <!-- Main layout -->
-      <main class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <!-- Left: Photo + instructions -->
-        <section class="lg:col-span-2 space-y-4">
-          <div class="bg-slate-900/60 border border-slate-800 rounded-2xl overflow-hidden">
-            <div class="px-4 md:px-6 py-4 border-b border-slate-800 flex items-center justify-between gap-4">
-              <div>
-                <div class="text-sm text-slate-300">Round</div>
-                <div class="text-lg font-semibold">
-                  <span id="roundLabel">—</span>
-                  <span class="text-slate-400 font-normal text-sm ml-2">
-                    (<span id="remainingLabel">—</span> remaining)
-                  </span>
+            <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 md:p-6 space-y-4">
+                <div class="flex flex-col md:flex-row gap-3 md:items-end">
+                    <div class="flex-1">
+                        <label class="block text-sm text-slate-300 mb-1" for="nameInput">Your name</label>
+                        <input id="nameInput"
+                            class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-slate-400"
+                            placeholder="e.g. Ben" autocomplete="nickname" />
+                    </div>
+                    <button id="joinBtn"
+                        class="px-4 py-2 rounded-xl bg-slate-100 text-slate-950 font-medium hover:bg-white disabled:opacity-50">
+                        Join
+                    </button>
                 </div>
-              </div>
 
-              <div class="text-xs text-slate-300">
-                You are: <span id="playerName" class="font-semibold text-slate-100">—</span>
-              </div>
-            </div>
-
-            <div class="p-4 md:p-6 space-y-4">
-              <div id="phaseBanner" class="hidden rounded-xl border border-slate-700 px-3 py-2 text-sm"></div>
-
-              <div id="imageWrap" class="hidden">
-                <img
-                  id="questionImage"
-                  class="w-full rounded-xl border border-slate-800 object-contain bg-slate-950"
-                  alt="Question"
-                />
-              </div>
-
-              <div id="instructions" class="text-sm text-slate-300">
-                <ul class="list-disc pl-5 space-y-1">
-                  <li>Click the map to place your guess.</li>
-                  <li>Hit <span class="font-semibold text-slate-100">Submit guess</span>.</li>
-                  <li>When revealed, you’ll see the real location and everyone’s pins.</li>
-                </ul>
-              </div>
-
-              <div class="flex flex-wrap gap-2 items-center">
-                <button
-                  id="submitBtn"
-                  class="px-4 py-2 rounded-xl bg-emerald-300 text-slate-950 font-medium hover:bg-emerald-200 disabled:opacity-50"
-                  disabled
-                >
-                  Submit guess
-                </button>
-
-                <button
-                  id="clearBtn"
-                  class="px-4 py-2 rounded-xl bg-slate-800 text-slate-100 font-medium hover:bg-slate-700 disabled:opacity-50"
-                  disabled
-                >
-                  Clear pin
-                </button>
-
-                <div class="text-xs text-slate-400">
-                  Status: <span id="statusText">—</span>
+                <div>
+                    <h2 class="text-lg font-semibold mb-3">Players online</h2>
+                    <ul id="playersList" class="space-y-2 text-sm text-slate-200"></ul>
+                    <div id="playersEmpty" class="text-sm text-slate-400 hidden">No one yet.</div>
                 </div>
-              </div>
             </div>
-          </div>
-
-          <!-- Map -->
-          <div class="bg-slate-900/60 border border-slate-800 rounded-2xl overflow-hidden">
-            <div class="px-4 md:px-6 py-4 border-b border-slate-800">
-              <div class="text-sm text-slate-300">Map</div>
-              <div class="text-lg font-semibold">Drop your pin</div>
-            </div>
-            <div class="p-3">
-              <div id="map" class="rounded-xl border border-slate-800 overflow-hidden"></div>
-            </div>
-          </div>
         </section>
 
-        <!-- Right: Lobby + Scores -->
-        <aside class="space-y-6">
-          <section class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 md:p-6">
-            <h2 class="text-lg font-semibold mb-3">Players</h2>
-            <ul id="playersList" class="space-y-2 text-sm text-slate-200"></ul>
-            <div id="playersEmpty" class="text-sm text-slate-400 hidden">No one yet.</div>
-          </section>
+        <!-- Game -->
+        <main id="gameView" class="hidden grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Left: Photo + map -->
+            <section class="lg:col-span-2 space-y-4">
+                <div class="bg-slate-900/60 border border-slate-800 rounded-2xl overflow-hidden">
+                    <div class="px-4 md:px-6 py-4 border-b border-slate-800 flex items-center justify-between gap-4">
+                        <div>
+                            <div class="text-sm text-slate-300">Round</div>
+                            <div class="text-lg font-semibold">
+                                <span id="roundLabel">—</span>
+                                <span class="text-slate-400 font-normal text-sm ml-2">
+                                    (<span id="remainingLabel">—</span> remaining)
+                                </span>
+                            </div>
+                        </div>
 
-          <section class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 md:p-6">
-            <h2 class="text-lg font-semibold mb-3">Leaderboard</h2>
-            <div id="scoresEmpty" class="text-sm text-slate-400">—</div>
-            <ol id="scoresList" class="space-y-2 text-sm"></ol>
-          </section>
+                        <div class="text-xs text-slate-300">
+                            You are: <span id="playerName" class="font-semibold text-slate-100">—</span>
+                        </div>
+                    </div>
 
-          <section class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 md:p-6">
-            <h2 class="text-lg font-semibold mb-2">Host controls</h2>
-            <p class="text-sm text-slate-400">
-              You advance rounds from the server CLI (<code class="text-slate-200">n</code>/<code class="text-slate-200">next</code>).
-            </p>
-          </section>
-        </aside>
-      </main>
+                    <div class="p-4 md:p-6 space-y-4">
+                        <div id="phaseBanner" class="hidden rounded-xl border border-slate-700 px-3 py-2 text-sm"></div>
+
+                        <div id="imageWrap" class="hidden">
+                            <img id="questionImage"
+                                class="w-full rounded-xl border border-slate-800 object-contain bg-slate-950"
+                                alt="Question" />
+                        </div>
+
+                        <div class="flex flex-wrap gap-2 items-center">
+                            <button id="submitBtn"
+                                class="px-4 py-2 rounded-xl bg-emerald-300 text-slate-950 font-medium hover:bg-emerald-200 disabled:opacity-50"
+                                disabled>
+                                Submit guess
+                            </button>
+
+                            <button id="clearBtn"
+                                class="px-4 py-2 rounded-xl bg-slate-800 text-slate-100 font-medium hover:bg-slate-700 disabled:opacity-50"
+                                disabled>
+                                Clear pin
+                            </button>
+
+                            <div class="text-xs text-slate-400">
+                                Status: <span id="statusText">—</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-slate-900/60 border border-slate-800 rounded-2xl overflow-hidden">
+                    <div class="px-4 md:px-6 py-4 border-b border-slate-800">
+                        <div class="text-sm text-slate-300">Map</div>
+                        <div class="text-lg font-semibold">Drop your pin</div>
+                    </div>
+                    <div class="p-3">
+                        <div id="map" class="rounded-xl border border-slate-800 overflow-hidden"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right: Leaderboard -->
+            <aside class="space-y-6">
+                <section class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 md:p-6">
+                    <h2 class="text-lg font-semibold mb-3">Leaderboard</h2>
+                    <div id="scoresEmpty" class="text-sm text-slate-400">—</div>
+                    <ol id="scoresList" class="space-y-2 text-sm"></ol>
+                </section>
+            </aside>
+        </main>
+
+        <!-- End -->
+        <section id="endView" class="hidden">
+            <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 md:p-6">
+                <h2 class="text-2xl font-semibold mb-4">Final leaderboard</h2>
+                <div id="endScoresEmpty" class="text-sm text-slate-400">—</div>
+                <ol id="endScoresList" class="space-y-2 text-sm"></ol>
+            </div>
+        </section>
     </div>
-  </body>
+</body>
+
 </html>
