@@ -138,7 +138,7 @@ def serialize_state(state: State) -> dict:
                 "type": "question",
                 "question": {
                     "image_path": image_url_for(phase.question.image_path),
-                    "latitude": phase.question.latitude,
+                    "latitude": phase.question.latitude if phase.revealed else None,
                     "longitude": phase.question.longitude if phase.revealed else None,
                 },
                 "guesses": {
