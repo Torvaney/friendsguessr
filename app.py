@@ -197,7 +197,7 @@ def submit_guess(state: State, name: str, lat: float, lon: float) -> State:
         scores = dict(phase.scores)
         for player, guess in phase.guesses.items():
             d = haversine_km(guess.latitude, guess.longitude, q.latitude, q.longitude)
-            scores[player] += score_from_distance_km(d)
+            scores[player] += d
         phase = replace(phase, revealed=True, scores=scores)
 
     return replace(state, phase=phase)
@@ -236,7 +236,7 @@ def advance(state: State) -> State:
                     q.latitude,
                     q.longitude,
                 )
-                scores[name] += score_from_distance_km(d)
+                scores[name] += d
 
             return replace(
                 state,
@@ -323,10 +323,6 @@ def haversine_km(lat1, lon1, lat2, lon2):
 
     a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
     return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-
-def score_from_distance_km(d):
-    return max(0.0, 5000.0 * math.exp(-d / 2000.0))
 
 
 # ---- Main ----
