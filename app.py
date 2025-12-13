@@ -189,13 +189,18 @@ def submit_guess(state: State, name: str, lat: float, lon: float) -> State:
     guesses = dict(state.phase.guesses)
     guesses[name] = Guess(lat, lon)
 
-    return replace(
-        state,
-        phase=replace(
-            state.phase,
-            guesses=guesses,
-        ),
-    )
+    phase = replace(state.phase, guesses=guesses)
+
+    # Auto-reveal when all players (scores keys) have submitted a guess
+    if len(phase.guesses) >= len(phase.scores) and len(phase.scores) > 0:
+        q = phase.question
+        scores = dict(phase.scores)
+        for player, guess in phase.guesses.items():
+            d = haversine_km(guess.latitude, guess.longitude, q.latitude, q.longitude)
+            scores[player] += score_from_distance_km(d)
+        phase = replace(phase, revealed=True, scores=scores)
+
+    return replace(state, phase=phase)
 
 
 def advance(state: State) -> State:
