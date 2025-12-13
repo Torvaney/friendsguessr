@@ -3,12 +3,77 @@ import pathlib
 import threading
 from dataclasses import dataclass, replace
 
+import exifread
 from flask import Flask, render_template
 from flask_socketio import SocketIO
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "dev"
 socketio = SocketIO(app, async_mode="threading", cors_allowed_origins="*")
+
+QUESTIONS_DIR = pathlib.Path(__file__).parent / "static" / "questions"
+
+
+# Image/Question loading
+
+
+@dataclass(frozen=True)
+class Question:
+    image_path: pathlib.Path
+    latitude: float
+    longitude: float
+
+
+def _ratio_to_float(r):
+    return float(r.num) / float(r.den)
+
+
+def read_gps_latlon(image_path: pathlib.Path) -> tuple[float, float] | None:
+    with image_path.open("rb") as f:
+        tags = exifread.process_file(f, details=False)
+
+    lat_tag = tags.get("GPS GPSLatitude")
+    lat_ref = tags.get("GPS GPSLatitudeRef")
+    lon_tag = tags.get("GPS GPSLongitude")
+    lon_ref = tags.get("GPS GPSLongitudeRef")
+
+    if not (lat_tag and lat_ref and lon_tag and lon_ref):
+        return None
+
+    lat_dms = [_ratio_to_float(x) for x in lat_tag.values]
+    lon_dms = [_ratio_to_float(x) for x in lon_tag.values]
+
+    lat = lat_dms[0] + lat_dms[1] / 60.0 + lat_dms[2] / 3600.0
+    lon = lon_dms[0] + lon_dms[1] / 60.0 + lon_dms[2] / 3600.0
+
+    if str(lat_ref.values[0]) == "S":
+        lat = -lat
+    if str(lon_ref.values[0]) == "W":
+        lon = -lon
+
+    return lat, lon
+
+
+def load_questions_from_dir(dir_path: pathlib.Path) -> tuple[Question, ...]:
+    questions = []
+
+    for p in sorted(dir_path.iterdir()):
+        if p.suffix.lower() not in {".jpg", ".jpeg"}:
+            continue
+
+        latlon = read_gps_latlon(p)
+        if not latlon:
+            print(f"[questions] SKIP {p.name}: no GPS EXIF")
+            continue
+
+        lat, lon = latlon
+        questions.append(Question(image_path=p, latitude=lat, longitude=lon))
+
+    if not questions:
+        raise RuntimeError("No usable questions found")
+
+    print(f"[questions] loaded {len(questions)} question(s)")
+    return tuple(questions)
 
 
 # State
@@ -23,12 +88,6 @@ class Lobby:
 class Guess:
     latitude: float
     longitude: float
-
-
-@dataclass(frozen=True)
-class Question:
-    image_path: pathlib.Path
-    # TODO: load lat/long from image metadata
 
 
 @dataclass(frozen=True)
@@ -51,9 +110,19 @@ class State:
     upcoming_questions: tuple[Question]
 
 
-init = State(phase=Lobby(joined=frozenset()), upcoming_questions=[])
+init = State(
+    phase=Lobby(joined=frozenset()),
+    upcoming_questions=load_questions_from_dir(QUESTIONS_DIR),
+)
 
 ## Serialisation...
+
+
+def image_url_for(path: pathlib.Path) -> str:
+    # assumes path is inside ".../static/"
+    static_dir = pathlib.Path(__file__).parent / "static"
+    rel = path.relative_to(static_dir).as_posix()
+    return f"/static/{rel}"
 
 
 def serialize_state(state: State) -> dict:
@@ -68,7 +137,7 @@ def serialize_state(state: State) -> dict:
             return {
                 "type": "question",
                 "question": {
-                    "image_path": str(phase.question.image_path),
+                    "image_path": image_url_for(phase.question.image_path),
                     "latitude": phase.question.latitude,
                     "longitude": phase.question.longitude if phase.revealed else None,
                 },

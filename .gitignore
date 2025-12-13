@@ -1,3 +1,7 @@
+# Images!
+static/questions/*
+!static/questions/.gitkeep
+
 # Python-generated files
 __pycache__/
 *.py[oc]
@@ -8,3 +12,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Macos
+.DS_Store
