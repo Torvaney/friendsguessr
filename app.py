@@ -1,18 +1,20 @@
 import math
+import os
 import pathlib
 import threading
 from dataclasses import dataclass, replace
+from typing import TypeAlias
 
 import exifread
 from flask import Flask, render_template
 from flask_socketio import SocketIO
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "dev"
+app.config["SECRET_KEY"] = os.getenv("APP_SECRET_KEY", "dev")
 socketio = SocketIO(app, async_mode="threading", cors_allowed_origins="*")
 
 QUESTIONS_DIR = pathlib.Path(__file__).parent / "static" / "questions"
-
+APP_PORT = os.getenv("APP_PORT", 4242)
 
 # Image/Question loading
 
@@ -77,11 +79,15 @@ def load_questions_from_dir(dir_path: pathlib.Path) -> tuple[Question, ...]:
 
 
 # State
+# State is defined as a series of screens, with a one-way flow through them
+# from Lobby -> QuestionRound -> ...(more QuestionRound) -> End
+
+PlayerName: TypeAlias = str
 
 
 @dataclass(frozen=True)
 class Lobby:
-    joined: frozenset[str]
+    joined: frozenset[PlayerName]
 
 
 @dataclass(frozen=True)
@@ -93,15 +99,15 @@ class Guess:
 @dataclass(frozen=True)
 class QuestionRound:
     question: Question
-    guesses: dict[str, Guess]
+    guesses: dict[PlayerName, Guess]
     revealed: bool
 
-    scores: dict[str, float]  # Cumulative. Carried forwards through each round
+    scores: dict[PlayerName, float]  # Cumulative. Carried forwards through each round
 
 
 @dataclass(frozen=True)
 class End:
-    scores: dict[str, float]
+    scores: dict[PlayerName, float]
 
 
 @dataclass(frozen=True)
@@ -115,7 +121,7 @@ init = State(
     upcoming_questions=load_questions_from_dir(QUESTIONS_DIR),
 )
 
-## Serialisation...
+## Serialisation of state (required to send to the frontend)...
 
 
 def image_url_for(path: pathlib.Path) -> str:
@@ -304,6 +310,7 @@ def on_guess(data):
 
 
 # Cli loop
+# Allow the host to advance the game, as needed the game
 
 
 def cli_loop():
@@ -325,7 +332,6 @@ def haversine_km(lat1, lon1, lat2, lon2):
     return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-# ---- Main ----
 if __name__ == "__main__":
     threading.Thread(target=cli_loop, daemon=True).start()
-    socketio.run(app, host="0.0.0.0", port=4242)
+    socketio.run(app, host="0.0.0.0", port=APP_PORT)

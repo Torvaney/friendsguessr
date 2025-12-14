@@ -1,3 +1,5 @@
+.env
+
 # Images!
 static/questions/*
 !static/questions/.gitkeep
