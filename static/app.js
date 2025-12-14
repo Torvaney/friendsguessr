@@ -203,28 +203,46 @@
     }
   }
 
-  function renderScoresInto(listEl, emptyEl, scores) {
-    listEl.innerHTML = "";
-    const keys = scores ? Object.keys(scores) : [];
-    if (!scores || keys.length === 0) {
-      emptyEl.textContent = "—";
-      return;
-    }
-    emptyEl.textContent = "";
-
-    const rows = Object.entries(scores).sort((a, b) => a[1] - b[1]);
-    for (const [name, score] of rows) {
-      const li = document.createElement("li");
-      const isMe = myName && name === myName;
-      li.className =
-        "flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2";
-      li.innerHTML = `
-        <span class="${isMe ? "font-semibold text-slate-100" : "text-slate-200"}">${escapeHtml(name)}</span>
-        <span class="tabular-nums text-slate-100">${Number(score).toFixed(1)} km</span>
-      `;
-      listEl.appendChild(li);
-    }
+function renderScoresInto(listEl, emptyEl, scores) {
+  listEl.innerHTML = "";
+  const keys = scores ? Object.keys(scores) : [];
+  if (!scores || keys.length === 0) {
+    emptyEl.textContent = "—";
+    return;
   }
+  emptyEl.textContent = "";
+
+  // Lower distance = better
+  const rows = Object.entries(scores).sort((a, b) => a[1] - b[1]);
+
+  const winnerName = rows[0][0];
+  const loserName = rows[rows.length - 1][0];
+
+  for (const [name, score] of rows) {
+    const li = document.createElement("li");
+    const isMe = myName && name === myName;
+    const isWinner = name === winnerName;
+    const isLoser = name === loserName;
+
+    li.className =
+      "flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2";
+
+    li.innerHTML = `
+      <div class="flex items-center gap-2">
+        <span class="${isMe ? "font-semibold text-slate-100" : "text-slate-200"}">
+          ${escapeHtml(name)}
+        </span>
+        ${isWinner ? `<span title="Winner">😎</span>` : ""}
+        ${isLoser ? `<span title="Loser">🥲</span>` : ""}
+      </div>
+      <span class="tabular-nums text-slate-100">${Number(score).toFixed(1)} km</span>
+    `;
+
+    listEl.appendChild(li);
+  }
+}
+
+
 
   function resetRoundUI() {
     myGuess = null;
