@@ -212,8 +212,8 @@ function renderScoresInto(listEl, emptyEl, scores) {
   }
   emptyEl.textContent = "";
 
-  // Lower distance = better
-  const rows = Object.entries(scores).sort((a, b) => a[1] - b[1]);
+  // Higher points = better
+  const rows = Object.entries(scores).sort((a, b) => b[1] - a[1]);
 
   const winnerName = rows[0][0];
   const loserName = rows[rows.length - 1][0];
@@ -235,7 +235,7 @@ function renderScoresInto(listEl, emptyEl, scores) {
         ${isWinner ? `<span title="Winner">😎</span>` : ""}
         ${isLoser ? `<span title="Loser">🥲</span>` : ""}
       </div>
-      <span class="tabular-nums text-slate-100">${Number(score).toFixed(1)} km</span>
+      <span class="tabular-nums text-slate-100">${Number(score).toFixed(1)} pts</span>
     `;
 
     listEl.appendChild(li);

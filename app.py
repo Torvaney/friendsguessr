@@ -201,9 +201,9 @@ def submit_guess(state: State, name: str, lat: float, lon: float) -> State:
     if len(phase.guesses) >= len(phase.scores) and len(phase.scores) > 0:
         q = phase.question
         scores = dict(phase.scores)
-        for player, guess in phase.guesses.items():
-            d = haversine_km(guess.latitude, guess.longitude, q.latitude, q.longitude)
-            scores[player] += d
+        round_points = calculate_round_points(phase.guesses, q)
+        for player, pts in round_points.items():
+            scores[player] += pts
         phase = replace(phase, revealed=True, scores=scores)
 
     return replace(state, phase=phase)
@@ -234,15 +234,9 @@ def advance(state: State) -> State:
         if not phase.revealed:
             q = phase.question
             scores = dict(phase.scores)
-
-            for name, guess in phase.guesses.items():
-                d = haversine_km(
-                    guess.latitude,
-                    guess.longitude,
-                    q.latitude,
-                    q.longitude,
-                )
-                scores[name] += d
+            round_points = calculate_round_points(phase.guesses, q)
+            for name, pts in round_points.items():
+                scores[name] += pts
 
             return replace(
                 state,
@@ -330,6 +324,42 @@ def haversine_km(lat1, lon1, lat2, lon2):
 
     a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
     return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def calculate_round_points(
+    guesses: dict[PlayerName, Guess], question: Question
+) -> dict[PlayerName, float]:
+    """Calculate points for a round using linear relative scoring.
+
+    - Best guess gets 10 points
+    - Linear scaling within 2x of best distance
+    - Beyond 2x gets 0 points
+    - Formula: points = 10 × (2 - your_distance/best_distance), clamped to 0-10
+    """
+    if not guesses:
+        return {}
+
+    # Calculate distances for all guesses
+    distances = {}
+    for name, guess in guesses.items():
+        d = haversine_km(guess.latitude, guess.longitude, question.latitude, question.longitude)
+        distances[name] = d
+
+    # Find best (minimum) distance
+    best_distance = min(distances.values())
+
+    # Handle edge case: if best distance is 0, use tiny value to avoid division by zero
+    if best_distance == 0:
+        best_distance = 0.001  # 1 meter
+
+    # Calculate points for each player
+    points = {}
+    for name, distance in distances.items():
+        ratio = distance / best_distance
+        raw_points = 10 * (2 - ratio)
+        points[name] = max(0.0, min(10.0, raw_points))  # Clamp to 0-10
+
+    return points
 
 
 if __name__ == "__main__":
