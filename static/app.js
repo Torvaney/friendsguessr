@@ -31,6 +31,9 @@
 
     endScoresEmpty: document.getElementById("endScoresEmpty"),
     endScoresList: document.getElementById("endScoresList"),
+
+    timerWrap: document.getElementById("timerWrap"),
+    timerLabel: document.getElementById("timerLabel"),
   };
 
   const storageKey = "geoquiz.name";
@@ -43,6 +46,9 @@
 
   let guessesLayer = null;
   let answerLayer = null;
+
+  let timerInterval = null;
+  let lastTimerDeadline = null;
 
   // ---- Map ----
   const map = L.map("map", { worldCopyJump: true }).setView([20, 0], 2);
@@ -94,6 +100,49 @@
 
     // Leaflet needs invalidateSize when container visibility changes
     setTimeout(() => map.invalidateSize(), 0);
+  }
+
+  // ---- Timer ----
+  function startTimerCountdown(secondsRemaining) {
+    clearTimerInterval();
+
+    let remaining = secondsRemaining;
+    updateTimerDisplay(remaining);
+    els.timerWrap.classList.remove("hidden");
+
+    timerInterval = setInterval(() => {
+      remaining--;
+      updateTimerDisplay(remaining);
+      if (remaining <= 0) clearTimerInterval();
+    }, 1000);
+  }
+
+  function updateTimerDisplay(seconds) {
+    els.timerLabel.textContent = seconds;
+
+    // Reset classes
+    els.timerWrap.classList.remove(
+      "border-slate-700", "bg-slate-900/40", "text-slate-200",
+      "border-amber-700", "bg-amber-900/30", "text-amber-100",
+      "border-red-700", "bg-red-900/30", "text-red-100"
+    );
+
+    // Visual urgency based on time remaining
+    if (seconds <= 5) {
+      els.timerWrap.classList.add("border-red-700", "bg-red-900/30", "text-red-100");
+    } else if (seconds <= 15) {
+      els.timerWrap.classList.add("border-amber-700", "bg-amber-900/30", "text-amber-100");
+    } else {
+      els.timerWrap.classList.add("border-slate-700", "bg-slate-900/40", "text-slate-200");
+    }
+  }
+
+  function clearTimerInterval() {
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+    }
+    if (els.timerWrap) els.timerWrap.classList.add("hidden");
   }
 
     function ensureNameUI() {
@@ -252,6 +301,8 @@ function renderScoresInto(listEl, emptyEl, scores) {
     }
     guessesLayer.clearLayers();
     answerLayer.clearLayers();
+    clearTimerInterval();
+    lastTimerDeadline = null;
 
     if (els.submitBtn) els.submitBtn.disabled = true;
     if (els.clearBtn) els.clearBtn.disabled = true;
@@ -296,6 +347,18 @@ function renderScoresInto(listEl, emptyEl, scores) {
     if (!phase.revealed) {
       clearBanner();
       setStatus("Click the map to place a pin.");
+
+      // Handle timer
+      if (phase.timer_seconds_remaining != null && phase.timer_seconds_remaining > 0) {
+        // Only restart timer if it's a new timer (avoid restarting on every state update)
+        if (lastTimerDeadline !== phase.timer_seconds_remaining || !timerInterval) {
+          lastTimerDeadline = phase.timer_seconds_remaining;
+          startTimerCountdown(phase.timer_seconds_remaining);
+        }
+      } else {
+        clearTimerInterval();
+      }
+
       // If I already guessed, lock submit
       if (myName && phase.guesses && phase.guesses[myName]) {
         els.submitBtn.disabled = true;
@@ -305,7 +368,9 @@ function renderScoresInto(listEl, emptyEl, scores) {
       return;
     }
 
-    // Revealed
+    // Revealed - clear timer
+    clearTimerInterval();
+    lastTimerDeadline = null;
     banner("Revealed! Pins and answer are shown.", "ok");
     setStatus("Revealed.");
 

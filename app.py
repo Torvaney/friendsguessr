@@ -2,6 +2,7 @@ import math
 import os
 import pathlib
 import threading
+import time
 from dataclasses import dataclass, replace
 from typing import TypeAlias
 
@@ -103,6 +104,7 @@ class QuestionRound:
     revealed: bool
 
     scores: dict[PlayerName, float]  # Cumulative. Carried forwards through each round
+    timer_deadline: float | None = None  # Unix timestamp when timer expires
 
 
 @dataclass(frozen=True)
@@ -140,6 +142,9 @@ def serialize_state(state: State) -> dict:
             }
 
         if isinstance(phase, QuestionRound):
+            timer_remaining = None
+            if phase.timer_deadline is not None:
+                timer_remaining = max(0, int(phase.timer_deadline - time.time()))
             return {
                 "type": "question",
                 "question": {
@@ -153,6 +158,7 @@ def serialize_state(state: State) -> dict:
                 },
                 "revealed": phase.revealed,
                 "scores": phase.scores,
+                "timer_seconds_remaining": timer_remaining,
             }
 
         if isinstance(phase, End):
@@ -196,6 +202,12 @@ def submit_guess(state: State, name: str, lat: float, lon: float) -> State:
     guesses[name] = Guess(lat, lon)
 
     phase = replace(state.phase, guesses=guesses)
+
+    # Start timer when half the players have submitted (ceiling)
+    if phase.timer_deadline is None and len(phase.scores) > 0:
+        threshold = math.ceil(len(phase.scores) / 2)
+        if len(phase.guesses) >= threshold:
+            phase = replace(phase, timer_deadline=time.time() + 30)
 
     # Auto-reveal when all players (scores keys) have submitted a guess
     if len(phase.guesses) >= len(phase.scores) and len(phase.scores) > 0:
@@ -277,6 +289,7 @@ def index():
 
 state_lock = threading.Lock()
 state: State = init
+scheduled_timers: set[float] = set()  # Track scheduled timer deadlines
 
 
 def update(socketio: SocketIO, fn, *args):
@@ -285,6 +298,32 @@ def update(socketio: SocketIO, fn, *args):
         state = fn(state, *args)
         payload = serialize_state(state)
     socketio.emit("state", payload)
+
+
+def schedule_timer_expiration(deadline: float):
+    """Schedule auto-reveal when timer expires."""
+
+    def check_and_expire():
+        sleep_time = max(0, deadline - time.time())
+        socketio.sleep(
+            sleep_time
+        )  # Use socketio.sleep for proper threading integration
+        global state
+        payload = None
+        with state_lock:
+            # Only expire if still in same question phase with same deadline
+            if (
+                isinstance(state.phase, QuestionRound)
+                and state.phase.timer_deadline == deadline
+                and not state.phase.revealed
+            ):
+                state = advance(state)
+                payload = serialize_state(state)
+        # Emit outside the lock to avoid potential deadlocks
+        if payload is not None:
+            socketio.emit("state", payload)
+
+    socketio.start_background_task(check_and_expire)
 
 
 @socketio.on("join")
@@ -301,6 +340,16 @@ def on_guess(data):
         data["latitude"],
         data["longitude"],
     )
+    # Schedule timer expiration if timer was just started (and not already scheduled)
+    with state_lock:
+        if (
+            isinstance(state.phase, QuestionRound)
+            and state.phase.timer_deadline is not None
+            and not state.phase.revealed
+            and state.phase.timer_deadline not in scheduled_timers
+        ):
+            scheduled_timers.add(state.phase.timer_deadline)
+            schedule_timer_expiration(state.phase.timer_deadline)
 
 
 # Cli loop
@@ -342,18 +391,20 @@ def calculate_round_points(
     # Calculate distances for all guesses
     distances = {}
     for name, guess in guesses.items():
-        d = haversine_km(guess.latitude, guess.longitude, question.latitude, question.longitude)
+        d = haversine_km(
+            guess.latitude,
+            guess.longitude,
+            question.latitude,
+            question.longitude,
+        )
         distances[name] = d
 
-    # Find best (minimum) distance
-    best_distance = min(distances.values())
-
-    # Handle edge case: if best distance is 0, use tiny value to avoid division by zero
-    if best_distance == 0:
-        best_distance = 0.001  # 1 meter
+    # Find best (minimum) distance, with a minimum of 100m
+    best_distance = max(min(distances.values()), 0.1)
 
     # Calculate points for each player
     points = {}
+
     for name, distance in distances.items():
         ratio = distance / best_distance
         raw_points = 10 * (2 - ratio)
